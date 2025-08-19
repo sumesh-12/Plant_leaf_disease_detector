@@ -3,20 +3,19 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
+import pandas as pd
 
 # --- Page Configuration ---
 st.set_page_config(
     page_title="Plant Disease Detector",
     page_icon="🌿",
-    layout="centered"
+    layout="wide"
 )
 
 # --- Model Loading ---
-# Use st.cache_resource to load the model only once, preventing reloads on every interaction.
 @st.cache_resource
 def load_plant_model():
     """Loads the pre-trained plant disease detection model."""
-    # IMPORTANT: Make sure the model filename matches the one you saved.
     model_path = 'plant_disease_model_densenet.h5' 
     try:
         model = load_model(model_path)
@@ -28,8 +27,6 @@ def load_plant_model():
 model = load_plant_model()
 
 # --- Class Names ---
-# IMPORTANT: This list MUST be in the same order as your training data folders.
-# You can get this order from the output of your Phase 1 preprocessing script.
 class_names = [
     'beans___angular_leaf_spot', 'beans___anthracnose', 'beans___bean_rust', 
     'beans___healthy', 'beans___mosaic_virus', 'maize___blight', 
@@ -40,22 +37,53 @@ class_names = [
     'tomato___septoria_leaf_spot', 'tomato___spider_mite', 'tomato___target_spot', 
     'tomato___yellow_leaf_curl_virus'
 ]
-# This is a generic list from the PlantVillage dataset. You may need to update it.
+
+# --- Disease Information and Suggestions ---
+disease_info = {
+    "healthy": "The plant appears to be healthy. Continue with regular care and monitoring.",
+    "angular_leaf_spot": "A fungal disease causing angular spots on leaves. Suggestions: Improve air circulation, avoid overhead watering, and consider using a fungicide.",
+    "anthracnose": "A fungal disease causing dark, sunken lesions. Suggestions: Prune affected areas, destroy infected plant debris, and apply a fungicide.",
+    "bean_rust": "A fungal disease causing rust-colored pustules. Suggestions: Ensure proper spacing for air circulation, avoid wet foliage, and use resistant varieties or fungicides.",
+    "mosaic_virus": "A viral disease causing mottled yellow and green patterns. Suggestions: There is no cure. Remove and destroy infected plants to prevent spread. Control aphids, which transmit the virus.",
+    "blight": "A common fungal or bacterial disease causing rapid browning and death of plant tissue. Suggestions: Improve air circulation, apply appropriate fungicides or bactericides, and remove infected parts.",
+    "common_rust": "A fungal disease common in maize, causing small, cinnamon-brown pustules. Suggestions: Plant resistant hybrids and apply fungicides if necessary.",
+    "downy_mildew": "A disease caused by an oomycete, leading to yellow spots and white mold on the underside of leaves. Suggestions: Reduce humidity, improve air circulation, and apply a targeted fungicide.",
+    "gray_leaf_spot": "A fungal disease causing small, rectangular gray lesions on maize leaves. Suggestions: Use resistant hybrids and practice crop rotation.",
+    "lethal_necrosis": "A severe viral disease in maize. Suggestions: There is no cure. Control the insect vectors that spread the virus and remove infected plants immediately.",
+    "my_streak_virus": "A viral disease in maize transmitted by leafhoppers. Suggestions: Control leafhopper populations and use resistant varieties.",
+    "bacterial_spot": "A bacterial disease causing small, water-soaked spots on tomato leaves. Suggestions: Avoid overhead watering, use disease-free seeds, and apply copper-based bactericides.",
+    "early_blight": "A fungal disease causing 'target spot' lesions on tomato leaves. Suggestions: Mulch around plants, prune lower leaves, and apply fungicides.",
+    "late_blight": "A devastating oomycete disease affecting tomatoes, causing large, dark lesions. Suggestions: Ensure good air circulation, avoid overhead watering, and apply preventative fungicides.",
+    "leaf_mold": "A fungal disease causing yellow spots on the upper leaf surface and olive-green mold underneath. Suggestions: Improve ventilation and reduce humidity.",
+    "septoria_leaf_spot": "A fungal disease causing small, circular spots with dark borders. Suggestions: Remove infected leaves, mulch, and apply fungicides.",
+    "spider_mite": "A common pest, not a disease, that causes stippling on leaves. Suggestions: Use insecticidal soap or miticides. Increase humidity as mites thrive in dry conditions.",
+    "target_spot": "A fungal disease causing target-like spots on tomato leaves. Suggestions: Improve air circulation and apply fungicides.",
+    "yellow_leaf_curl_virus": "A viral disease transmitted by whiteflies, causing yellowing and curling of leaves. Suggestions: Control whitefly populations and remove infected plants."
+}
 
 # --- Image Preprocessing ---
 def preprocess_image(image):
     """Preprocesses the uploaded image to be compatible with the model."""
     img = image.resize((128, 128))
     img_array = np.array(img)
-    img_array = img_array / 255.0 # Normalize pixel values
-    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+    img_array = img_array / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
     return img_array
 
-# --- UI Elements ---
+# --- Main Page UI ---
 st.title("🌿 Plant Leaf Disease Detector")
+
+# --- NEW: Why to treat plant diseases section ---
+st.subheader("Why to treat plant diseases?")
+st.info(
+    """
+    Plant leaf diseases need to be eradicated to prevent significant economic losses, reduced crop yields, and potential food shortages. Early detection and treatment are crucial to minimize the impact of diseases on plant health and productivity.
+    """
+)
+
 st.write(
     "Upload an image of a plant leaf to identify its health status. "
-    "Our advanced model will analyze the image and predict the disease."
+    "Our model will analyze the image and predict the disease."
 )
 
 uploaded_file = st.file_uploader(
@@ -65,28 +93,80 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
-    st.image(image, caption='Uploaded Image.', use_column_width=True)
-    st.write("")
+    col1, col2 = st.columns(2)
 
-    if st.button('Diagnose Leaf'):
-        if model is not None:
-            with st.spinner('Analyzing the leaf... This may take a moment.'):
-                try:
-                    processed_image = preprocess_image(image)
-                    prediction = model.predict(processed_image)
-                    predicted_class_index = np.argmax(prediction)
-                    predicted_class_name = class_names[predicted_class_index]
+    with col1:
+        st.image(image, caption='Uploaded Image.', use_column_width=True)
+    
+    with col2:
+        if st.button('Diagnose Leaf'):
+            if model is not None:
+                with st.spinner('Analyzing the leaf...'):
+                    try:
+                        processed_image = preprocess_image(image)
+                        prediction = model.predict(processed_image)
+                        
+                        top_indices = np.argsort(prediction[0])[-3:][::-1]
+                        top_classes = [class_names[i] for i in top_indices]
+                        top_confidences = [prediction[0][i] for i in top_indices]
 
-                    plant, disease = predicted_class_name.split('___')
-                    plant = plant.replace('_', ' ').title()
-                    disease = disease.replace('_', ' ').title()
+                        predicted_class_name = top_classes[0]
+                        confidence = top_confidences[0]
+                        
+                        plant, disease = predicted_class_name.split('___')
+                        plant = plant.replace('_', ' ').title()
+                        disease_key = disease.lower()
+                        disease_display = disease.replace('_', ' ').title()
 
-                    st.success(f"**Diagnosis Complete!**")
-                    st.markdown(f"**Plant Type:** `{plant}`")
-                    st.markdown(f"**Predicted Condition:** `{disease}`")
+                        st.success(f"**Diagnosis Complete!**")
+                        st.metric("Top Prediction", f"{plant} - {disease_display}", f"Confidence: {confidence:.2%}")
 
-                except Exception as e:
-                    st.error(f"An error occurred during prediction: {e}")
-        else:
-            st.warning("The model is not loaded. Please ensure the model file is in the correct directory.")
+                        if disease_key in disease_info:
+                            st.info(f"**Suggestion:** {disease_info[disease_key]}")
+                        else:
+                            st.warning("No specific suggestion available for this condition.")
 
+                        st.subheader("Top Predictions")
+                        df = pd.DataFrame({
+                            'Disease': [c.split('___')[1].replace('_', ' ').title() for c in top_classes],
+                            'Confidence': top_confidences
+                        })
+                        st.dataframe(df, use_container_width=True)
+                        st.bar_chart(df.set_index('Disease'))
+
+                    except Exception as e:
+                        st.error(f"An error occurred during prediction: {e}")
+            else:
+                st.warning("The model is not loaded.")
+
+st.markdown("---") # Visual separator
+
+# --- NEW: Techniques used in model section ---
+st.subheader("The techniques used in model:")
+st.markdown(
+    """
+    - **Transfer Learning with DenseNet121**: We started with a powerful pre-trained model that already knows how to see features in images.
+    - **Custom Classifier Architecture**: We added new layers on top to teach the model how to classify your specific plant diseases.
+    - **Two-Phase Training Strategy**: We first trained only the new layers, then "fine-tuned" the whole model with a tiny learning rate for maximum accuracy.
+    - **Smart Optimization and Monitoring**: We used callbacks to automatically save the best model, stop training if it wasn't improving, and adjust the learning rate for better results.
+    """
+)
+
+st.markdown("---") # Visual separator
+
+# --- NEW: SDG 3 section ---
+col1_sdg, col2_sdg = st.columns([1, 2]) # Create two columns, the second one being wider
+
+with col1_sdg:
+    try:
+        st.image("Sustainable_Development_Goal_03GoodHealth.jpg")
+    except FileNotFoundError:
+        st.warning("SDG image not found. Make sure 'Sustainable_Development_Goal_03GoodHealth.jpg' is in the same folder as the app.")
+
+with col2_sdg:
+    st.subheader("Contribution to SDG 3: Good Health and Well-Being")
+    st.write(
+        """
+        By improving food safety and security, this project directly contributes to SDG 3: Good Health and Well-Being. This technology contributes to the safety and health of the food we eat by identifying plant diseases early. It enables targeted treatment, protecting crop yields and lowering the need for excessive chemical pesticides. This results in a safer and more reliable food supply, which is essential for preventing hunger and advancing the welfare of communities worldwide.
+        """
+    )
